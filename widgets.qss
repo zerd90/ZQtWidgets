@@ -1,0 +1,115 @@
+/* Colors are @tokens resolved from WidgetColors. */
+
+/* ==================== ToggleSwitch ==================== */
+QToolButton#toggleSwitchButton,
+QToolButton#toggleSwitchButton:hover,
+QToolButton#toggleSwitchButton:pressed,
+QToolButton#toggleSwitchButton:checked,
+QToolButton#toggleSwitchButton:checked:hover,
+QToolButton#toggleSwitchButton:disabled,
+QMainWindow#mainWindow QToolButton#toggleSwitchButton,
+QMainWindow#mainWindow QToolButton#toggleSwitchButton:hover,
+QMainWindow#mainWindow QToolButton#toggleSwitchButton:pressed,
+QMainWindow#mainWindow QToolButton#toggleSwitchButton:checked,
+QDialog QToolButton#toggleSwitchButton,
+QDialog QToolButton#toggleSwitchButton:hover,
+QDialog QToolButton#toggleSwitchButton:pressed,
+QDialog QToolButton#toggleSwitchButton:checked {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+/* ==================== UniformComboBox ==================== */
+UniformComboBox {
+    color: @text;
+    background: @surface;
+    border: 1px solid @border;
+    border-radius: 8px;
+    padding: 0 32px 0 10px;
+    font-size: 14px;
+    min-height: 32px;
+    max-height: 32px;
+}
+
+UniformComboBox:hover {
+    border-color: @textDisabled;
+    background: @surfaceMuted;
+}
+
+UniformComboBox:pressed {
+    border-color: @accent;
+}
+
+UniformComboBox:disabled {
+    color: @textDisabled;
+    background: @surfaceMuted;
+    border-color: @border;
+}
+
+UniformComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 28px;
+    border: none;
+    border-left: 1px solid @border;
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+UniformComboBox::down-arrow {
+    image: none;
+}
+
+UniformComboBox QAbstractItemView {
+    color: @text;
+    background: @surface;
+    border: 1px solid @border;
+    selection-background-color: @accent;
+    selection-color: @surface;
+}
+
+UniformComboBox QAbstractItemView::item:hover {
+    background: @surfaceMuted;
+}
+
+UniformComboBox QAbstractItemView::item:selected:enabled {
+    color: @surface;
+    background: @accent;
+}
+
+UniformComboBox QAbstractItemView::item:disabled {
+    color: @textDisabled;
+    background: transparent;
+}
+
+/* ==================== StepButtonSlider ==================== */
+QWidget#stepButtonSlider QPushButton#stepButtonSliderButton {
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0;
+    border-radius: 6px;
+    color: @text;
+    background: @surface;
+    border: 1px solid @border;
+}
+
+QWidget#stepButtonSlider QPushButton#stepButtonSliderButton:hover {
+    color: @text;
+    background: @surfaceMuted;
+    border-color: @textDisabled;
+}
+
+QWidget#stepButtonSlider QPushButton#stepButtonSliderButton:pressed {
+    color: @accent;
+    background: @surface;
+    border-color: @accent;
+}
+
+QWidget#stepButtonSlider QPushButton#stepButtonSliderButton:disabled {
+    color: @textDisabled;
+    background: @surfaceMuted;
+    border-color: @border;
+}

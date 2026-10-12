@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/qt-custom-widgets">
+        <file>widgets.qss</file>
+    </qresource>
+</RCC>

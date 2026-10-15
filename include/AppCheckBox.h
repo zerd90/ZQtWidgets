@@ -2,7 +2,9 @@
 
 #include <QWidget>
 
-class QToolButton;
+#include <memory>
+
+class AppCheckBoxPrivate;
 
 class AppCheckBox final : public QWidget
 {
@@ -10,6 +12,7 @@ class AppCheckBox final : public QWidget
 
 public:
     explicit AppCheckBox(const QString &text, QWidget *parent = nullptr);
+    ~AppCheckBox() override;
 
     bool isChecked() const;
     void setChecked(bool checked);
@@ -27,8 +30,6 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    QRect indicatorRect() const;
-
-    QString      m_text;
-    QToolButton *m_button = nullptr;
+    Q_DECLARE_PRIVATE(AppCheckBox)
+    std::unique_ptr<AppCheckBoxPrivate> d_ptr;
 };

@@ -2,65 +2,83 @@
 #include "WidgetColors.h"
 #include "WidgetStyle.h"
 
+#include <QAbstractButton>
 #include <QEvent>
+#include <QPainter>
+#include <QToolButton>
 
-ToggleSwitch::ToggleSwitch(QWidget *parent) : QWidget(parent)
+class ToggleSwitchPrivate
 {
-    ensureQtCustomWidgetsStyle();
-    m_button = new QToolButton(this);
-    m_button->setObjectName(QStringLiteral("toggleSwitchButton"));
-    m_button->setCheckable(true);
-    m_button->setChecked(false);
-    m_button->setAutoRaise(true);
-    m_button->setCursor(Qt::PointingHandCursor);
-    m_button->setFocusPolicy(Qt::StrongFocus);
-    m_button->setAttribute(Qt::WA_TranslucentBackground, true);
-    m_button->setAttribute(Qt::WA_NoSystemBackground, true);
-    m_button->setAutoFillBackground(false);
-    m_button->setStyleSheet(QStringLiteral("QToolButton#toggleSwitchButton,"
-                                           "QToolButton#toggleSwitchButton:hover,"
-                                           "QToolButton#toggleSwitchButton:pressed,"
-                                           "QToolButton#toggleSwitchButton:checked,"
-                                           "QToolButton#toggleSwitchButton:checked:hover,"
-                                           "QToolButton#toggleSwitchButton:disabled {"
-                                           " background:transparent; border:none; padding:0; }"));
-    m_button->installEventFilter(this);
-    setFixedSize(QSize(44, 22));
-    m_button->setGeometry(rect());
+public:
+    QToolButton *m_button = nullptr;
+};
 
-    QObject::connect(m_button, &QAbstractButton::toggled, this,
+ToggleSwitch::ToggleSwitch(QWidget *parent) : QWidget(parent), d_ptr(std::make_unique<ToggleSwitchPrivate>())
+{
+    Q_D(ToggleSwitch);
+    ensureQtCustomWidgetsStyle();
+    d->m_button = new QToolButton(this);
+    d->m_button->setObjectName(QStringLiteral("toggleSwitchButton"));
+    d->m_button->setCheckable(true);
+    d->m_button->setChecked(false);
+    d->m_button->setAutoRaise(true);
+    d->m_button->setCursor(Qt::PointingHandCursor);
+    d->m_button->setFocusPolicy(Qt::StrongFocus);
+    d->m_button->setAttribute(Qt::WA_TranslucentBackground, true);
+    d->m_button->setAttribute(Qt::WA_NoSystemBackground, true);
+    d->m_button->setAutoFillBackground(false);
+    d->m_button->setStyleSheet(QStringLiteral("QToolButton#toggleSwitchButton,"
+                                              "QToolButton#toggleSwitchButton:hover,"
+                                              "QToolButton#toggleSwitchButton:pressed,"
+                                              "QToolButton#toggleSwitchButton:checked,"
+                                              "QToolButton#toggleSwitchButton:checked:hover,"
+                                              "QToolButton#toggleSwitchButton:disabled {"
+                                              " background:transparent; border:none; padding:0; }"));
+    d->m_button->installEventFilter(this);
+    setFixedSize(QSize(44, 22));
+    d->m_button->setGeometry(rect());
+
+    QObject::connect(d->m_button, &QAbstractButton::toggled, this,
                      [this](bool checked)
                      {
                          update();
                          emit toggled(checked);
                      });
 }
+
+ToggleSwitch::~ToggleSwitch() = default;
+
 bool ToggleSwitch::isChecked() const
 {
-    return m_button && m_button->isChecked();
+    Q_D(const ToggleSwitch);
+    return d->m_button && d->m_button->isChecked();
 }
+
 void ToggleSwitch::setChecked(bool checked)
 {
-    if (m_button)
-    {
-        m_button->setChecked(checked);
-    }
+    Q_D(ToggleSwitch);
+    if (d->m_button)
+        d->m_button->setChecked(checked);
 }
+
 QAbstractButton *ToggleSwitch::button() const
 {
-    return m_button;
+    Q_D(const ToggleSwitch);
+    return d->m_button;
 }
+
 void ToggleSwitch::resizeEvent(QResizeEvent *event)
 {
+    Q_D(ToggleSwitch);
     QWidget::resizeEvent(event);
-    if (m_button)
-    {
-        m_button->setGeometry(rect());
-    }
+    if (d->m_button)
+        d->m_button->setGeometry(rect());
 }
+
 bool ToggleSwitch::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_button && event)
+    Q_D(ToggleSwitch);
+    if (watched == d->m_button && event)
     {
         switch (event->type())
         {
@@ -79,6 +97,7 @@ bool ToggleSwitch::eventFilter(QObject *watched, QEvent *event)
 
 void ToggleSwitch::paintEvent(QPaintEvent *)
 {
+    Q_D(ToggleSwitch);
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
@@ -86,7 +105,7 @@ void ToggleSwitch::paintEvent(QPaintEvent *)
     const qreal  radius = r.height() / 2.0;
 
     const bool checked = isChecked();
-    const bool hovered = isEnabled() && m_button && m_button->underMouse();
+    const bool hovered = isEnabled() && d->m_button && d->m_button->underMouse();
 
     QColor trackOff    = WidgetColors::color(WidgetColors::Role::Border);
     QColor trackOn     = WidgetColors::color(WidgetColors::Role::Accent);

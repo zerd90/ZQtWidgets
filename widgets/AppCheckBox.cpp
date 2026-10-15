@@ -14,36 +14,50 @@ namespace
     constexpr int kGap     = 8;
 } // namespace
 
-AppCheckBox::AppCheckBox(const QString &text, QWidget *parent) : QWidget(parent), m_text(text)
+class AppCheckBoxPrivate
 {
+public:
+    explicit AppCheckBoxPrivate(AppCheckBox *owner, const QString &text) : q(owner), m_text(text) {}
+
+    QRect indicatorRect() const { return QRect(0, (q->height() - kBoxSize) / 2, kBoxSize, kBoxSize); }
+
+    AppCheckBox *q = nullptr;
+    QString      m_text;
+    QToolButton *m_button = nullptr;
+};
+
+AppCheckBox::AppCheckBox(const QString &text, QWidget *parent)
+    : QWidget(parent), d_ptr(std::make_unique<AppCheckBoxPrivate>(this, text))
+{
+    Q_D(AppCheckBox);
     ensureQtCustomWidgetsStyle();
     setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     setCursor(Qt::PointingHandCursor);
     setAttribute(Qt::WA_MacShowFocusRect, false);
 
-    m_button = new QToolButton(this);
-    m_button->setObjectName(QStringLiteral("appCheckBoxButton"));
-    m_button->setCheckable(true);
-    m_button->setChecked(false);
-    m_button->setAutoRaise(true);
-    m_button->setCursor(Qt::PointingHandCursor);
-    m_button->setFocusPolicy(Qt::StrongFocus);
-    m_button->setAttribute(Qt::WA_MacShowFocusRect, false);
-    m_button->setAttribute(Qt::WA_TranslucentBackground, true);
-    m_button->setAttribute(Qt::WA_NoSystemBackground, true);
-    m_button->setAutoFillBackground(false);
-    m_button->setStyleSheet(QStringLiteral("QToolButton#appCheckBoxButton,"
-                                           "QToolButton#appCheckBoxButton:hover,"
-                                           "QToolButton#appCheckBoxButton:pressed,"
-                                           "QToolButton#appCheckBoxButton:checked,"
-                                           "QToolButton#appCheckBoxButton:checked:hover,"
-                                           "QToolButton#appCheckBoxButton:focus,"
-                                           "QToolButton#appCheckBoxButton:disabled {"
-                                           " background:transparent; border:none; padding:0; outline:none; }"));
-    m_button->setGeometry(rect());
-    m_button->installEventFilter(this);
+    d->m_button = new QToolButton(this);
+    d->m_button->setObjectName(QStringLiteral("appCheckBoxButton"));
+    d->m_button->setCheckable(true);
+    d->m_button->setChecked(false);
+    d->m_button->setAutoRaise(true);
+    d->m_button->setCursor(Qt::PointingHandCursor);
+    d->m_button->setFocusPolicy(Qt::StrongFocus);
+    d->m_button->setAttribute(Qt::WA_MacShowFocusRect, false);
+    d->m_button->setAttribute(Qt::WA_TranslucentBackground, true);
+    d->m_button->setAttribute(Qt::WA_NoSystemBackground, true);
+    d->m_button->setAutoFillBackground(false);
+    d->m_button->setStyleSheet(QStringLiteral("QToolButton#appCheckBoxButton,"
+                                              "QToolButton#appCheckBoxButton:hover,"
+                                              "QToolButton#appCheckBoxButton:pressed,"
+                                              "QToolButton#appCheckBoxButton:checked,"
+                                              "QToolButton#appCheckBoxButton:checked:hover,"
+                                              "QToolButton#appCheckBoxButton:focus,"
+                                              "QToolButton#appCheckBoxButton:disabled {"
+                                              " background:transparent; border:none; padding:0; outline:none; }"));
+    d->m_button->setGeometry(rect());
+    d->m_button->installEventFilter(this);
 
-    connect(m_button, &QAbstractButton::toggled, this,
+    connect(d->m_button, &QAbstractButton::toggled, this,
             [this](bool checked)
             {
                 update();
@@ -51,21 +65,26 @@ AppCheckBox::AppCheckBox(const QString &text, QWidget *parent) : QWidget(parent)
             });
 }
 
+AppCheckBox::~AppCheckBox() = default;
+
 bool AppCheckBox::isChecked() const
 {
-    return m_button && m_button->isChecked();
+    Q_D(const AppCheckBox);
+    return d->m_button && d->m_button->isChecked();
 }
 
 void AppCheckBox::setChecked(bool checked)
 {
-    if (m_button)
-        m_button->setChecked(checked);
+    Q_D(AppCheckBox);
+    if (d->m_button)
+        d->m_button->setChecked(checked);
 }
 
 QSize AppCheckBox::sizeHint() const
 {
+    Q_D(const AppCheckBox);
     const QFontMetrics metrics(font());
-    const int          textWidth = metrics.horizontalAdvance(m_text);
+    const int          textWidth = metrics.horizontalAdvance(d->m_text);
     const int          height    = qMax(kBoxSize, metrics.height());
     return QSize(kBoxSize + kGap + textWidth, height);
 }
@@ -85,25 +104,22 @@ void AppCheckBox::changeEvent(QEvent *event)
 
 void AppCheckBox::resizeEvent(QResizeEvent *event)
 {
+    Q_D(AppCheckBox);
     QWidget::resizeEvent(event);
-    if (m_button)
-        m_button->setGeometry(rect());
-}
-
-QRect AppCheckBox::indicatorRect() const
-{
-    return QRect(0, (height() - kBoxSize) / 2, kBoxSize, kBoxSize);
+    if (d->m_button)
+        d->m_button->setGeometry(rect());
 }
 
 void AppCheckBox::paintEvent(QPaintEvent *)
 {
+    Q_D(AppCheckBox);
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
     const bool   enabled = isEnabled();
     const bool   checked = isChecked();
-    const bool   hovered = enabled && m_button && m_button->underMouse();
-    const QRectF box     = QRectF(indicatorRect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    const bool   hovered = enabled && d->m_button && d->m_button->underMouse();
+    const QRectF box     = QRectF(d->indicatorRect()).adjusted(0.5, 0.5, -0.5, -0.5);
 
     QColor fill   = WidgetColors::color(WidgetColors::Role::Surface);
     QColor border = hovered ? WidgetColors::color(WidgetColors::Role::TextDisabled)
@@ -144,12 +160,13 @@ void AppCheckBox::paintEvent(QPaintEvent *)
                            : WidgetColors::color(WidgetColors::Role::TextDisabled));
     painter.setFont(font());
     const QRect textRect(kBoxSize + kGap, 0, qMax(0, width() - kBoxSize - kGap), height());
-    painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, m_text);
+    painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, d->m_text);
 }
 
 bool AppCheckBox::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_button && event)
+    Q_D(AppCheckBox);
+    if (watched == d->m_button && event)
     {
         switch (event->type())
         {

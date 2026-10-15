@@ -6,6 +6,10 @@
 #include <QVector>
 #include <QWidget>
 
+#include <memory>
+
+class TimedLineChartPrivate;
+
 class TimedLineChart final : public QWidget
 {
 public:
@@ -16,6 +20,7 @@ public:
     };
 
     explicit TimedLineChart(QWidget *parent = nullptr);
+    ~TimedLineChart() override;
 
     void setChartSize(const QSize &size);
     void setVisibleSampleCount(int count);
@@ -28,9 +33,8 @@ protected:
     void paintEvent(QPaintEvent *event) override;
 
 private:
-    QVector<Series>         m_series;
-    QVector<QVector<qreal>> m_values;
-    int                     m_visibleSampleCount = 60;
+    Q_DECLARE_PRIVATE(TimedLineChart)
+    std::unique_ptr<TimedLineChartPrivate> d_ptr;
 };
 
 #endif // TIMEDLINECHART_H

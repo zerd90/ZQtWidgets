@@ -2,9 +2,9 @@
 
 #include <QWidget>
 
-class QPushButton;
-class QSlider;
-class QTimer;
+#include <memory>
+
+class StepButtonSliderPrivate;
 
 class StepButtonSlider final : public QWidget
 {
@@ -12,6 +12,7 @@ class StepButtonSlider final : public QWidget
 
 public:
     explicit StepButtonSlider(Qt::Orientation orientation, QWidget *parent = nullptr, bool stepButtonsVisible = true);
+    ~StepButtonSlider() override;
 
     int  value() const;
     int  minimum() const;
@@ -31,13 +32,6 @@ signals:
     void sliderReleased();
 
 private:
-    void step(int direction);
-    void beginStepping(int direction);
-    void endStepping(int direction);
-
-    QPushButton *m_minusButton   = nullptr;
-    QSlider     *m_slider        = nullptr;
-    QPushButton *m_plusButton    = nullptr;
-    QTimer      *m_repeatTimer   = nullptr;
-    int          m_stepDirection = 0;
+    Q_DECLARE_PRIVATE(StepButtonSlider)
+    std::unique_ptr<StepButtonSliderPrivate> d_ptr;
 };

@@ -68,9 +68,44 @@ namespace
     };
 } // namespace
 
-StepButtonSlider::StepButtonSlider(Qt::Orientation orientation, QWidget *parent, bool stepButtonsVisible)
-    : QWidget(parent)
+class StepButtonSliderPrivate
 {
+public:
+    void step(int direction)
+    {
+        if (!m_slider || direction == 0)
+            return;
+        m_slider->setValue(m_slider->value() + direction * m_slider->singleStep());
+    }
+
+    void beginStepping(int direction)
+    {
+        m_stepDirection = direction;
+        m_slider->setSliderDown(true);
+        step(direction);
+        m_repeatTimer->start(400);
+    }
+
+    void endStepping(int direction)
+    {
+        if (m_stepDirection != direction)
+            return;
+        m_repeatTimer->stop();
+        m_stepDirection = 0;
+        m_slider->setSliderDown(false);
+    }
+
+    QPushButton *m_minusButton   = nullptr;
+    QSlider     *m_slider        = nullptr;
+    QPushButton *m_plusButton    = nullptr;
+    QTimer      *m_repeatTimer   = nullptr;
+    int          m_stepDirection = 0;
+};
+
+StepButtonSlider::StepButtonSlider(Qt::Orientation orientation, QWidget *parent, bool stepButtonsVisible)
+    : QWidget(parent), d_ptr(std::make_unique<StepButtonSliderPrivate>())
+{
+    Q_D(StepButtonSlider);
     ensureQtCustomWidgetsStyle();
     setObjectName(QStringLiteral("stepButtonSlider"));
 
@@ -78,129 +113,118 @@ StepButtonSlider::StepButtonSlider(Qt::Orientation orientation, QWidget *parent,
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
-    m_minusButton = new QPushButton(QStringLiteral("-"), this);
-    m_minusButton->setObjectName(QStringLiteral("stepButtonSliderButton"));
-    m_minusButton->setFocusPolicy(Qt::NoFocus);
-    m_minusButton->setCursor(Qt::PointingHandCursor);
-    m_minusButton->setFixedSize(20, 20);
-    m_minusButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    d->m_minusButton = new QPushButton(QStringLiteral("-"), this);
+    d->m_minusButton->setObjectName(QStringLiteral("stepButtonSliderButton"));
+    d->m_minusButton->setFocusPolicy(Qt::NoFocus);
+    d->m_minusButton->setCursor(Qt::PointingHandCursor);
+    d->m_minusButton->setFixedSize(20, 20);
+    d->m_minusButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
-    m_slider = new ClickJumpSlider(orientation, this);
-    m_slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    d->m_slider = new ClickJumpSlider(orientation, this);
+    d->m_slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-    m_plusButton = new QPushButton(QStringLiteral("+"), this);
-    m_plusButton->setObjectName(QStringLiteral("stepButtonSliderButton"));
-    m_plusButton->setFocusPolicy(Qt::NoFocus);
-    m_plusButton->setCursor(Qt::PointingHandCursor);
-    m_plusButton->setFixedSize(20, 20);
-    m_plusButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    d->m_plusButton = new QPushButton(QStringLiteral("+"), this);
+    d->m_plusButton->setObjectName(QStringLiteral("stepButtonSliderButton"));
+    d->m_plusButton->setFocusPolicy(Qt::NoFocus);
+    d->m_plusButton->setCursor(Qt::PointingHandCursor);
+    d->m_plusButton->setFixedSize(20, 20);
+    d->m_plusButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
-    layout->addWidget(m_minusButton);
-    layout->addWidget(m_slider, 1);
-    layout->addWidget(m_plusButton);
+    layout->addWidget(d->m_minusButton);
+    layout->addWidget(d->m_slider, 1);
+    layout->addWidget(d->m_plusButton);
 
-    m_repeatTimer = new QTimer(this);
-    m_repeatTimer->setSingleShot(false);
-    connect(m_repeatTimer, &QTimer::timeout, this,
-            [this]()
+    d->m_repeatTimer = new QTimer(this);
+    d->m_repeatTimer->setSingleShot(false);
+    connect(d->m_repeatTimer, &QTimer::timeout, this,
+            [d]()
             {
-                step(m_stepDirection);
-                if (m_repeatTimer->interval() != 80)
-                    m_repeatTimer->setInterval(80);
+                d->step(d->m_stepDirection);
+                if (d->m_repeatTimer->interval() != 80)
+                    d->m_repeatTimer->setInterval(80);
             });
-    connect(m_minusButton, &QPushButton::pressed, this, [this]() { beginStepping(-1); });
-    connect(m_minusButton, &QPushButton::released, this, [this]() { endStepping(-1); });
-    connect(m_plusButton, &QPushButton::pressed, this, [this]() { beginStepping(1); });
-    connect(m_plusButton, &QPushButton::released, this, [this]() { endStepping(1); });
-    connect(m_slider, &QSlider::valueChanged, this, &StepButtonSlider::valueChanged);
-    connect(m_slider, &QSlider::sliderReleased, this, &StepButtonSlider::sliderReleased);
+    connect(d->m_minusButton, &QPushButton::pressed, this, [d]() { d->beginStepping(-1); });
+    connect(d->m_minusButton, &QPushButton::released, this, [d]() { d->endStepping(-1); });
+    connect(d->m_plusButton, &QPushButton::pressed, this, [d]() { d->beginStepping(1); });
+    connect(d->m_plusButton, &QPushButton::released, this, [d]() { d->endStepping(1); });
+    connect(d->m_slider, &QSlider::valueChanged, this, &StepButtonSlider::valueChanged);
+    connect(d->m_slider, &QSlider::sliderReleased, this, &StepButtonSlider::sliderReleased);
 
     setStepButtonsVisible(stepButtonsVisible);
 }
 
+StepButtonSlider::~StepButtonSlider() = default;
+
 int StepButtonSlider::value() const
 {
-    return m_slider ? m_slider->value() : 0;
+    Q_D(const StepButtonSlider);
+    return d->m_slider ? d->m_slider->value() : 0;
 }
 
 int StepButtonSlider::minimum() const
 {
-    return m_slider ? m_slider->minimum() : 0;
+    Q_D(const StepButtonSlider);
+    return d->m_slider ? d->m_slider->minimum() : 0;
 }
 
 int StepButtonSlider::maximum() const
 {
-    return m_slider ? m_slider->maximum() : 0;
+    Q_D(const StepButtonSlider);
+    return d->m_slider ? d->m_slider->maximum() : 0;
 }
 
 void StepButtonSlider::setRange(int minimum, int maximum)
 {
-    if (m_slider)
-        m_slider->setRange(minimum, maximum);
+    Q_D(StepButtonSlider);
+    if (d->m_slider)
+        d->m_slider->setRange(minimum, maximum);
 }
 
 void StepButtonSlider::setValue(int value)
 {
-    if (m_slider)
-        m_slider->setValue(value);
+    Q_D(StepButtonSlider);
+    if (d->m_slider)
+        d->m_slider->setValue(value);
 }
 
 void StepButtonSlider::setSingleStep(int step)
 {
-    if (m_slider)
-        m_slider->setSingleStep(step);
+    Q_D(StepButtonSlider);
+    if (d->m_slider)
+        d->m_slider->setSingleStep(step);
 }
 
 void StepButtonSlider::setPageStep(int step)
 {
-    if (m_slider)
-        m_slider->setPageStep(step);
+    Q_D(StepButtonSlider);
+    if (d->m_slider)
+        d->m_slider->setPageStep(step);
 }
 
 void StepButtonSlider::setMinimumWidth(int width)
 {
-    if (m_slider)
-        m_slider->setMinimumWidth(width);
+    Q_D(StepButtonSlider);
+    if (d->m_slider)
+        d->m_slider->setMinimumWidth(width);
 }
 
 bool StepButtonSlider::isSliderDown() const
 {
-    return m_slider && m_slider->isSliderDown();
-}
-
-void StepButtonSlider::step(int direction)
-{
-    if (!m_slider || direction == 0)
-        return;
-    m_slider->setValue(m_slider->value() + direction * m_slider->singleStep());
-}
-
-void StepButtonSlider::beginStepping(int direction)
-{
-    m_stepDirection = direction;
-    m_slider->setSliderDown(true);
-    step(direction);
-    m_repeatTimer->start(400);
-}
-
-void StepButtonSlider::endStepping(int direction)
-{
-    if (m_stepDirection != direction)
-        return;
-    m_repeatTimer->stop();
-    m_stepDirection = 0;
-    m_slider->setSliderDown(false);
+    Q_D(const StepButtonSlider);
+    return d->m_slider && d->m_slider->isSliderDown();
 }
 
 void StepButtonSlider::setStepButtonsVisible(bool visible)
 {
-    if (m_minusButton)
-        m_minusButton->setVisible(visible);
-    if (m_plusButton)
-        m_plusButton->setVisible(visible);
+    Q_D(StepButtonSlider);
+    if (d->m_minusButton)
+        d->m_minusButton->setVisible(visible);
+    if (d->m_plusButton)
+        d->m_plusButton->setVisible(visible);
 }
 
 bool StepButtonSlider::stepButtonsVisible() const
 {
-    return m_minusButton && m_minusButton->isVisible();
+    Q_D(const StepButtonSlider);
+    return d->m_minusButton && d->m_minusButton->isVisible();
 }

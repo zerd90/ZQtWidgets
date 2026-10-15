@@ -2,10 +2,11 @@
 #define TOGGLESWITCH_H
 
 #include <QWidget>
-#include <QToolButton>
-#include <QPainter>
-#include <QResizeEvent>
-#include <QPaintEvent>
+
+#include <memory>
+
+class QAbstractButton;
+class ToggleSwitchPrivate;
 
 class ToggleSwitch : public QWidget
 {
@@ -13,10 +14,10 @@ class ToggleSwitch : public QWidget
 
 public:
     explicit ToggleSwitch(QWidget *parent = nullptr);
+    ~ToggleSwitch() override;
 
-    bool isChecked() const;
-    void setChecked(bool checked);
-
+    bool             isChecked() const;
+    void             setChecked(bool checked);
     QAbstractButton *button() const;
 
 signals:
@@ -28,7 +29,8 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    QToolButton *m_button = nullptr;
+    Q_DECLARE_PRIVATE(ToggleSwitch)
+    std::unique_ptr<ToggleSwitchPrivate> d_ptr;
 };
 
 #endif // TOGGLESWITCH_H

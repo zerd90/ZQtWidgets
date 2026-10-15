@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QEasingCurve>
 #include <QEvent>
+#include <QFontMetrics>
 #include <QFrame>
 #include <QKeyEvent>
 #include <QListWidget>
@@ -14,6 +15,7 @@
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPointer>
 #include <QScreen>
 #include <QStandardItemModel>
 #include <QStyle>
@@ -58,264 +60,124 @@ namespace
     };
 } // namespace
 
-UniformComboBox::UniformComboBox(QWidget *parent) : QComboBox(parent)
+class UniformComboBoxPrivate
 {
-    ensureQtCustomWidgetsStyle();
-    connect(WidgetPaletteNotifier::instance(), &WidgetPaletteNotifier::changed, this,
-            [this]() { refreshPaletteDependentStyle(); });
-    setSizeAdjustPolicy(QComboBox::AdjustToContents);
-    setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-    setMinimumContentsLength(0);
-    setItemDelegate(new UniformComboBoxItemDelegate(this));
-    bindModel(model());
-    updateComboGeometry();
-}
+public:
+    explicit UniformComboBoxPrivate(UniformComboBox *owner) : q(owner) {}
+    ~UniformComboBoxPrivate();
 
-UniformComboBox::~UniformComboBox()
+    void   bindModel(QAbstractItemModel *model);
+    void   updateComboGeometry();
+    void   ensureOverlayPopup();
+    void   applyOverlayPopupStyle();
+    void   refreshPaletteDependentStyle();
+    void   showOverlayPopup();
+    void   hideOverlayPopup();
+    void   notifyOverlayPopupHidden();
+    void   placeOverlayPopup(int popupWidth, int popupHeight);
+    void   applyOverlayReveal(qreal progress);
+    void   runOverlayAnimation(bool expand);
+    void   finishOverlayHide();
+    void   applyOverlayPopupSelection(int comboIndex);
+    bool   handleOverlayPopupKey(QKeyEvent *event);
+    void   moveOverlayPopupSelection(int delta);
+    QPoint overlayComboGlobalPos() const;
+    int    overlayPopupRowHeight() const;
+    int    overlayPopupFontPx() const;
+
+    UniformComboBox *q = nullptr;
+
+    // Always use Tool overlay popup (avoids native player surface dismissing Qt::Popup).
+    bool                    m_overlayPopupEnabled = true;
+    bool                    m_appFilterInstalled  = false;
+    int                     m_overlayFontPx       = 14;
+    int                     m_overlayRowHeight    = 32;
+    int                     m_overlayRadius       = 8;
+    int                     m_overlayGap          = 6;
+    int                     m_overlayFramePad     = 4;
+    QPointer<QFrame>        m_overlayPopup;
+    QPointer<QListWidget>   m_overlayList;
+    QVariantAnimation      *m_overlayAnimation = nullptr;
+    QRect                   m_overlayFullRect;
+    bool                    m_overlayOpensAbove                = true;
+    bool                    m_overlayOpenNotified              = false;
+    bool                    m_suppressOverlayAnimationFinished = false;
+    bool                    m_blockOverlayReveal               = false;
+    qreal                   m_overlayReveal                    = 0;
+    QMetaObject::Connection m_rowsInsertedConnection;
+    QMetaObject::Connection m_rowsRemovedConnection;
+    QMetaObject::Connection m_modelResetConnection;
+    QMetaObject::Connection m_dataChangedConnection;
+};
+
+UniformComboBoxPrivate::~UniformComboBoxPrivate()
 {
     m_suppressOverlayAnimationFinished = true;
     if (m_overlayAnimation)
         m_overlayAnimation->stop();
     if (m_appFilterInstalled && qApp)
     {
-        qApp->removeEventFilter(this);
+        qApp->removeEventFilter(q);
         m_appFilterInstalled = false;
     }
     if (m_overlayPopup)
     {
-        m_overlayPopup->removeEventFilter(this);
+        m_overlayPopup->removeEventFilter(q);
         if (m_overlayList)
-            m_overlayList->removeEventFilter(this);
+            m_overlayList->removeEventFilter(q);
         delete m_overlayPopup;
     }
 }
 
-void UniformComboBox::setModel(QAbstractItemModel *model)
+void UniformComboBoxPrivate::bindModel(QAbstractItemModel *model)
 {
-    if (model == this->model())
-    {
-        return;
-    }
+    QObject::disconnect(m_rowsInsertedConnection);
+    QObject::disconnect(m_rowsRemovedConnection);
+    QObject::disconnect(m_modelResetConnection);
+    QObject::disconnect(m_dataChangedConnection);
 
-    bindModel(nullptr);
-    QComboBox::setModel(model);
-    bindModel(model);
-    updateComboGeometry();
-}
-
-void UniformComboBox::setItemEnabled(int index, bool enabled)
-{
-    auto          *standardModel = qobject_cast<QStandardItemModel *>(model());
-    QStandardItem *item          = standardModel ? standardModel->item(index) : nullptr;
-    if (!item)
-    {
-        return;
-    }
-
-    item->setEnabled(enabled);
-}
-
-void UniformComboBox::setOverlayPopupEnabled(bool enabled)
-{
-    m_overlayPopupEnabled = enabled;
-    if (!enabled)
-        hideOverlayPopup();
-}
-
-void UniformComboBox::setOverlayPopupMetrics(int fontPx, int rowHeight, int radius, int gapAboveBar, int framePadding)
-{
-    // Popup list metrics only — do not touch the combo's own font/chrome (app.qss owns that).
-    m_overlayFontPx    = qMax(10, fontPx);
-    m_overlayRowHeight = qMax(16, rowHeight);
-    m_overlayRadius    = qMax(4, radius);
-    m_overlayGap       = qMax(2, gapAboveBar);
-    m_overlayFramePad  = qMax(2, framePadding);
-
-    if (m_overlayPopup)
-        applyOverlayPopupStyle();
-}
-
-bool UniformComboBox::isOverlayPopupVisible() const
-{
-    return m_overlayPopup && m_overlayPopup->isVisible();
-}
-
-bool UniformComboBox::containsOverlayPopup(const QPoint &globalPos) const
-{
-    return m_overlayPopup && m_overlayPopup->isVisible() && m_overlayPopup->frameGeometry().contains(globalPos);
-}
-
-void UniformComboBox::changeEvent(QEvent *event)
-{
-    QComboBox::changeEvent(event);
-
-    if (!event)
-    {
-        return;
-    }
-
-    switch (event->type())
-    {
-        case QEvent::FontChange:
-        case QEvent::StyleChange:
-        case QEvent::PaletteChange:
-        case QEvent::LayoutDirectionChange:
-            updateComboGeometry();
-            break;
-        default:
-            break;
-    }
-}
-
-void UniformComboBox::paintEvent(QPaintEvent *event)
-{
-    QComboBox::paintEvent(event);
-
-    QStyleOptionComboBox option;
-    initStyleOption(&option);
-    const QRect arrowRect = style()->subControlRect(QStyle::CC_ComboBox, &option, QStyle::SC_ComboBoxArrow, this);
-    if (!arrowRect.isValid())
+    if (!model)
         return;
 
-    const qreal   arrowWidth  = qBound(8, qRound(height() * 0.38), 12);
-    const qreal   arrowHeight = arrowWidth * 0.62;
-    const QPointF center      = arrowRect.center();
-    QPainterPath  caret;
-    caret.moveTo(center.x() - arrowWidth / 2.0, center.y() - arrowHeight / 2.0);
-    caret.lineTo(center.x() + arrowWidth / 2.0, center.y() - arrowHeight / 2.0);
-    caret.lineTo(center.x(), center.y() + arrowHeight / 2.0);
-    caret.closeSubpath();
-
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(!isEnabled()   ? WidgetColors::color(WidgetColors::Role::TextDisabled)
-                     : underMouse() ? WidgetColors::color(WidgetColors::Role::Text)
-                                    : WidgetColors::color(WidgetColors::Role::TextMuted));
-    painter.drawPath(caret);
+    m_rowsInsertedConnection =
+        QObject::connect(model, &QAbstractItemModel::rowsInserted, q, [this]() { updateComboGeometry(); });
+    m_rowsRemovedConnection =
+        QObject::connect(model, &QAbstractItemModel::rowsRemoved, q, [this]() { updateComboGeometry(); });
+    m_modelResetConnection =
+        QObject::connect(model, &QAbstractItemModel::modelReset, q, [this]() { updateComboGeometry(); });
+    m_dataChangedConnection =
+        QObject::connect(model, &QAbstractItemModel::dataChanged, q, [this]() { updateComboGeometry(); });
 }
 
-void UniformComboBox::showPopup()
+void UniformComboBoxPrivate::updateComboGeometry()
 {
-    if (m_overlayPopupEnabled)
-    {
-        if (isOverlayPopupVisible())
-            hideOverlayPopup();
-        else
-            showOverlayPopup();
-        return;
-    }
-
-    if (view())
-    {
-        const int visibleRows = qMin(count(), maxVisibleItems());
-        view()->setMinimumHeight(visibleRows * 32 + 2 * view()->frameWidth());
-    }
-    QComboBox::showPopup();
-    emit popupVisibilityChanged(true);
+    q->adjustSize();
+    q->updateGeometry();
+    q->update();
 }
 
-void UniformComboBox::hidePopup()
-{
-    if (m_overlayPopupEnabled)
-    {
-        hideOverlayPopup();
-        return;
-    }
-    QComboBox::hidePopup();
-    emit popupVisibilityChanged(false);
-}
-
-void UniformComboBox::closeOverlayPopup()
-{
-    hideOverlayPopup();
-}
-
-void UniformComboBox::keyPressEvent(QKeyEvent *event)
-{
-    if (m_overlayPopupEnabled)
-    {
-        if (isOverlayPopupVisible() && handleOverlayPopupKey(event))
-            return;
-        if (!isOverlayPopupVisible() && event
-            && (event->key() == Qt::Key_Down || event->key() == Qt::Key_Up || event->key() == Qt::Key_Space
-                || event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_F4))
-        {
-            showOverlayPopup();
-            return;
-        }
-    }
-    QComboBox::keyPressEvent(event);
-}
-
-bool UniformComboBox::eventFilter(QObject *watched, QEvent *event)
-{
-    if (!event)
-        return QComboBox::eventFilter(watched, event);
-
-    // Tool popup does not auto-dismiss like Qt::Popup. Title-bar clicks are
-    // non-client events, so they never arrive as MouseButtonPress.
-    const bool outsidePress = event->type() == QEvent::MouseButtonPress
-                           || event->type() == QEvent::NonClientAreaMouseButtonPress
-                           || event->type() == QEvent::NonClientAreaMouseButtonDblClick;
-    if (m_overlayPopupEnabled && isOverlayPopupVisible() && outsidePress)
-    {
-        const auto *mouse = static_cast<QMouseEvent *>(event);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-        const QPoint globalPos = mouse->globalPosition().toPoint();
-#else
-        const QPoint globalPos = mouse->globalPos();
-#endif
-        const QRect comboGlobal(mapToGlobal(QPoint(0, 0)), size());
-        if (!containsOverlayPopup(globalPos) && !comboGlobal.contains(globalPos))
-            hideOverlayPopup();
-    }
-
-    if (watched == m_overlayPopup || watched == m_overlayList)
-    {
-        if (event->type() == QEvent::KeyPress && handleOverlayPopupKey(static_cast<QKeyEvent *>(event)))
-            return true;
-        if (watched == m_overlayPopup && event->type() == QEvent::Paint)
-        {
-            // WA_TranslucentBackground ignores stylesheet fills on macOS; paint manually.
-            QPainter painter(m_overlayPopup);
-            painter.setRenderHint(QPainter::Antialiasing, true);
-            const QRectF bounds = QRectF(m_overlayPopup->rect()).adjusted(0.5, 0.5, -0.5, -0.5);
-            QPainterPath path;
-            path.addRoundedRect(bounds, m_overlayRadius, m_overlayRadius);
-            painter.fillPath(path, WidgetColors::color(WidgetColors::Role::Surface));
-            painter.setPen(QPen(WidgetColors::color(WidgetColors::Role::Border), 1.0));
-            painter.drawPath(path);
-            return false;
-        }
-        if (watched == m_overlayPopup && (event->type() == QEvent::Hide || event->type() == QEvent::Close))
-            notifyOverlayPopupHidden();
-    }
-    return QComboBox::eventFilter(watched, event);
-}
-
-int UniformComboBox::overlayPopupFontPx() const
+int UniformComboBoxPrivate::overlayPopupFontPx() const
 {
     return m_overlayFontPx;
 }
 
-int UniformComboBox::overlayPopupRowHeight() const
+int UniformComboBoxPrivate::overlayPopupRowHeight() const
 {
     return m_overlayRowHeight;
 }
 
-QPoint UniformComboBox::overlayComboGlobalPos() const
+QPoint UniformComboBoxPrivate::overlayComboGlobalPos() const
 {
-    QWidget *barWindow = window();
+    QWidget *barWindow = q->window();
     if (barWindow)
     {
         if (QWindow *handle = barWindow->windowHandle())
-            return handle->mapToGlobal(mapTo(barWindow, QPoint(0, 0)));
+            return handle->mapToGlobal(q->mapTo(barWindow, QPoint(0, 0)));
     }
-    return mapToGlobal(QPoint(0, 0));
+    return q->mapToGlobal(QPoint(0, 0));
 }
 
-void UniformComboBox::placeOverlayPopup(int popupWidth, int popupHeight)
+void UniformComboBoxPrivate::placeOverlayPopup(int popupWidth, int popupHeight)
 {
     if (!m_overlayPopup)
         return;
@@ -323,11 +185,11 @@ void UniformComboBox::placeOverlayPopup(int popupWidth, int popupHeight)
     // Anchor to the combo itself (works for toolbar overlay fish combos and
     // normal window combos like stream/speed). Prefer above; fall back below.
     const QPoint comboTopLeft = overlayComboGlobalPos();
-    const int    comboBottom  = comboTopLeft.y() + height();
+    const int    comboBottom  = comboTopLeft.y() + q->height();
     int          popupX       = comboTopLeft.x();
     int          popupY       = comboTopLeft.y() - popupHeight - m_overlayGap;
 
-    if (QScreen *screen = this->screen())
+    if (QScreen *screen = q->screen())
     {
         const QRect avail    = screen->availableGeometry();
         popupX               = qBound(avail.left(), popupX, avail.right() - popupWidth + 1);
@@ -344,10 +206,10 @@ void UniformComboBox::placeOverlayPopup(int popupWidth, int popupHeight)
     }
 
     m_overlayFullRect   = QRect(popupX, popupY, popupWidth, popupHeight);
-    m_overlayOpensAbove = popupY + popupHeight / 2 < comboTopLeft.y() + height() / 2;
+    m_overlayOpensAbove = popupY + popupHeight / 2 < comboTopLeft.y() + q->height() / 2;
 }
 
-void UniformComboBox::applyOverlayPopupStyle()
+void UniformComboBoxPrivate::applyOverlayPopupStyle()
 {
     if (!m_overlayPopup)
         return;
@@ -397,9 +259,9 @@ void UniformComboBox::applyOverlayPopupStyle()
         layout->setContentsMargins(m_overlayFramePad, m_overlayFramePad, m_overlayFramePad, m_overlayFramePad);
 }
 
-void UniformComboBox::refreshPaletteDependentStyle()
+void UniformComboBoxPrivate::refreshPaletteDependentStyle()
 {
-    update();
+    q->update();
     if (!m_overlayList)
         return;
 
@@ -412,7 +274,7 @@ void UniformComboBox::refreshPaletteDependentStyle()
     }
 }
 
-void UniformComboBox::ensureOverlayPopup()
+void UniformComboBoxPrivate::ensureOverlayPopup()
 {
     if (m_overlayPopup)
         return;
@@ -442,46 +304,47 @@ void UniformComboBox::ensureOverlayPopup()
     layout->addWidget(m_overlayList);
     applyOverlayPopupStyle();
 
-    connect(m_overlayList, &QListWidget::itemClicked, this,
-            [this](QListWidgetItem *item)
-            {
-                if (!item)
-                    return;
-                applyOverlayPopupSelection(item->data(Qt::UserRole).toInt());
-            });
+    QObject::connect(m_overlayList, &QListWidget::itemClicked, q,
+                     [this](QListWidgetItem *item)
+                     {
+                         if (!item)
+                             return;
+                         applyOverlayPopupSelection(item->data(Qt::UserRole).toInt());
+                     });
 
-    m_overlayPopup->installEventFilter(this);
-    m_overlayList->installEventFilter(this);
+    m_overlayPopup->installEventFilter(q);
+    m_overlayList->installEventFilter(q);
 }
 
-void UniformComboBox::showOverlayPopup()
+void UniformComboBoxPrivate::showOverlayPopup()
 {
     ensureOverlayPopup();
     if (!m_overlayPopup || !m_overlayList)
         return;
 
     m_overlayList->clear();
-    QFontMetrics metrics(font());
+    QFontMetrics metrics(q->font());
     int          textWidth = 0;
     const int    rowHeight = overlayPopupRowHeight();
-    for (int i = 0; i < count(); ++i)
+    for (int i = 0; i < q->count(); ++i)
     {
-        auto *item = new QListWidgetItem(itemText(i), m_overlayList);
+        auto *item = new QListWidgetItem(q->itemText(i), m_overlayList);
         item->setData(Qt::UserRole, i);
-        const bool enabled = model() && model()->flags(model()->index(i, modelColumn())).testFlag(Qt::ItemIsEnabled);
+        const bool enabled =
+            q->model() && q->model()->flags(q->model()->index(i, q->modelColumn())).testFlag(Qt::ItemIsEnabled);
         item->setFlags(enabled ? (Qt::ItemIsEnabled | Qt::ItemIsSelectable) : Qt::NoItemFlags);
         if (!enabled)
             item->setForeground(WidgetColors::color(WidgetColors::Role::TextDisabled));
         item->setSizeHint(QSize(0, rowHeight));
-        textWidth = qMax(textWidth, metrics.horizontalAdvance(itemText(i)));
-        if (enabled && i == currentIndex())
+        textWidth = qMax(textWidth, metrics.horizontalAdvance(q->itemText(i)));
+        if (enabled && i == q->currentIndex())
             item->setSelected(true);
     }
 
-    const int rows        = qMax(count(), 1);
+    const int rows        = qMax(q->count(), 1);
     const int listHeight  = rows * rowHeight + qMax(0, rows - 1) * 2;
     const int framePad    = m_overlayFramePad * 2;
-    const int popupWidth  = qMax(width(), textWidth + 36);
+    const int popupWidth  = qMax(q->width(), textWidth + 36);
     const int popupHeight = listHeight + framePad;
 
     m_overlayList->setFixedSize(popupWidth - framePad, listHeight);
@@ -497,18 +360,18 @@ void UniformComboBox::showOverlayPopup()
     m_overlayList->setFocus(Qt::PopupFocusReason);
     if (qApp && !m_appFilterInstalled)
     {
-        qApp->installEventFilter(this);
+        qApp->installEventFilter(q);
         m_appFilterInstalled = true;
     }
     if (!m_overlayOpenNotified)
     {
         m_overlayOpenNotified = true;
-        emit popupVisibilityChanged(true);
+        emit q->popupVisibilityChanged(true);
     }
     runOverlayAnimation(true);
 }
 
-void UniformComboBox::applyOverlayReveal(qreal progress)
+void UniformComboBoxPrivate::applyOverlayReveal(qreal progress)
 {
     if (!m_overlayPopup)
         return;
@@ -535,30 +398,30 @@ void UniformComboBox::applyOverlayReveal(qreal progress)
     m_overlayList->move(m_overlayFramePad, listY);
 }
 
-void UniformComboBox::runOverlayAnimation(bool expand)
+void UniformComboBoxPrivate::runOverlayAnimation(bool expand)
 {
     if (!m_overlayPopup)
         return;
     if (!m_overlayAnimation)
     {
-        m_overlayAnimation = new QVariantAnimation(this);
+        m_overlayAnimation = new QVariantAnimation(q);
         m_overlayAnimation->setDuration(170);
-        connect(m_overlayAnimation, &QVariantAnimation::valueChanged, this,
-                [this](const QVariant &value)
-                {
-                    if (m_blockOverlayReveal)
-                        return;
-                    applyOverlayReveal(value.toReal());
-                });
-        connect(m_overlayAnimation, &QVariantAnimation::finished, this,
-                [this]()
-                {
-                    if (m_suppressOverlayAnimationFinished || m_blockOverlayReveal || !m_overlayPopup
-                        || !m_overlayPopup->isVisible())
-                        return;
-                    if (m_overlayAnimation->endValue().toReal() < 0.5)
-                        finishOverlayHide();
-                });
+        QObject::connect(m_overlayAnimation, &QVariantAnimation::valueChanged, q,
+                         [this](const QVariant &value)
+                         {
+                             if (m_blockOverlayReveal)
+                                 return;
+                             applyOverlayReveal(value.toReal());
+                         });
+        QObject::connect(m_overlayAnimation, &QVariantAnimation::finished, q,
+                         [this]()
+                         {
+                             if (m_suppressOverlayAnimationFinished || m_blockOverlayReveal || !m_overlayPopup
+                                 || !m_overlayPopup->isVisible())
+                                 return;
+                             if (m_overlayAnimation->endValue().toReal() < 0.5)
+                                 finishOverlayHide();
+                         });
     }
 
     if (m_overlayAnimation->state() == QAbstractAnimation::Running
@@ -580,13 +443,13 @@ void UniformComboBox::runOverlayAnimation(bool expand)
     m_overlayAnimation->start();
 }
 
-void UniformComboBox::finishOverlayHide()
+void UniformComboBoxPrivate::finishOverlayHide()
 {
     m_overlayReveal       = 0;
     m_overlayOpenNotified = false;
     if (m_appFilterInstalled && qApp)
     {
-        qApp->removeEventFilter(this);
+        qApp->removeEventFilter(q);
         m_appFilterInstalled = false;
     }
     if (!m_overlayPopup || !m_overlayPopup->isVisible())
@@ -595,7 +458,7 @@ void UniformComboBox::finishOverlayHide()
     m_overlayPopup->hide();
 }
 
-void UniformComboBox::hideOverlayPopup()
+void UniformComboBoxPrivate::hideOverlayPopup()
 {
     if (!m_overlayPopup || (!m_overlayPopup->isVisible() && m_overlayReveal <= 0))
         return;
@@ -607,19 +470,19 @@ void UniformComboBox::hideOverlayPopup()
     runOverlayAnimation(false);
 }
 
-void UniformComboBox::notifyOverlayPopupHidden()
+void UniformComboBoxPrivate::notifyOverlayPopupHidden()
 {
-    emit popupVisibilityChanged(false);
+    emit q->popupVisibilityChanged(false);
 }
 
-void UniformComboBox::applyOverlayPopupSelection(int comboIndex)
+void UniformComboBoxPrivate::applyOverlayPopupSelection(int comboIndex)
 {
-    if (comboIndex >= 0 && comboIndex < count())
-        setCurrentIndex(comboIndex);
+    if (comboIndex >= 0 && comboIndex < q->count())
+        q->setCurrentIndex(comboIndex);
     hideOverlayPopup();
 }
 
-void UniformComboBox::moveOverlayPopupSelection(int delta)
+void UniformComboBoxPrivate::moveOverlayPopupSelection(int delta)
 {
     if (!m_overlayList || m_overlayList->count() == 0)
         return;
@@ -639,9 +502,9 @@ void UniformComboBox::moveOverlayPopupSelection(int delta)
     }
 }
 
-bool UniformComboBox::handleOverlayPopupKey(QKeyEvent *event)
+bool UniformComboBoxPrivate::handleOverlayPopupKey(QKeyEvent *event)
 {
-    if (!event || !isOverlayPopupVisible())
+    if (!event || !q->isOverlayPopupVisible())
         return false;
 
     switch (event->key())
@@ -676,37 +539,235 @@ bool UniformComboBox::handleOverlayPopupKey(QKeyEvent *event)
     }
 }
 
+UniformComboBox::UniformComboBox(QWidget *parent)
+    : QComboBox(parent), d_ptr(std::make_unique<UniformComboBoxPrivate>(this))
+{
+    Q_D(UniformComboBox);
+    ensureQtCustomWidgetsStyle();
+    connect(WidgetPaletteNotifier::instance(), &WidgetPaletteNotifier::changed, this,
+            [d]() { d->refreshPaletteDependentStyle(); });
+    setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    setMinimumContentsLength(0);
+    setItemDelegate(new UniformComboBoxItemDelegate(this));
+    d->bindModel(model());
+    d->updateComboGeometry();
+}
+
+UniformComboBox::~UniformComboBox() = default;
+
+void UniformComboBox::setModel(QAbstractItemModel *model)
+{
+    Q_D(UniformComboBox);
+    if (model == this->model())
+        return;
+
+    d->bindModel(nullptr);
+    QComboBox::setModel(model);
+    d->bindModel(model);
+    d->updateComboGeometry();
+}
+
+void UniformComboBox::setItemEnabled(int index, bool enabled)
+{
+    auto          *standardModel = qobject_cast<QStandardItemModel *>(model());
+    QStandardItem *item          = standardModel ? standardModel->item(index) : nullptr;
+    if (!item)
+        return;
+
+    item->setEnabled(enabled);
+}
+
+void UniformComboBox::setOverlayPopupEnabled(bool enabled)
+{
+    Q_D(UniformComboBox);
+    d->m_overlayPopupEnabled = enabled;
+    if (!enabled)
+        d->hideOverlayPopup();
+}
+
+void UniformComboBox::setOverlayPopupMetrics(int fontPx, int rowHeight, int radius, int gapAboveBar, int framePadding)
+{
+    Q_D(UniformComboBox);
+    // Popup list metrics only — do not touch the combo's own font/chrome (app.qss owns that).
+    d->m_overlayFontPx    = qMax(10, fontPx);
+    d->m_overlayRowHeight = qMax(16, rowHeight);
+    d->m_overlayRadius    = qMax(4, radius);
+    d->m_overlayGap       = qMax(2, gapAboveBar);
+    d->m_overlayFramePad  = qMax(2, framePadding);
+
+    if (d->m_overlayPopup)
+        d->applyOverlayPopupStyle();
+}
+
+bool UniformComboBox::isOverlayPopupVisible() const
+{
+    Q_D(const UniformComboBox);
+    return d->m_overlayPopup && d->m_overlayPopup->isVisible();
+}
+
+bool UniformComboBox::containsOverlayPopup(const QPoint &globalPos) const
+{
+    Q_D(const UniformComboBox);
+    return d->m_overlayPopup && d->m_overlayPopup->isVisible()
+        && d->m_overlayPopup->frameGeometry().contains(globalPos);
+}
+
+void UniformComboBox::closeOverlayPopup()
+{
+    Q_D(UniformComboBox);
+    d->hideOverlayPopup();
+}
+
+void UniformComboBox::changeEvent(QEvent *event)
+{
+    Q_D(UniformComboBox);
+    QComboBox::changeEvent(event);
+
+    if (!event)
+        return;
+
+    switch (event->type())
+    {
+        case QEvent::FontChange:
+        case QEvent::StyleChange:
+        case QEvent::PaletteChange:
+        case QEvent::LayoutDirectionChange:
+            d->updateComboGeometry();
+            break;
+        default:
+            break;
+    }
+}
+
+void UniformComboBox::paintEvent(QPaintEvent *event)
+{
+    QComboBox::paintEvent(event);
+
+    QStyleOptionComboBox option;
+    initStyleOption(&option);
+    const QRect arrowRect = style()->subControlRect(QStyle::CC_ComboBox, &option, QStyle::SC_ComboBoxArrow, this);
+    if (!arrowRect.isValid())
+        return;
+
+    const qreal   arrowWidth  = qBound(8, qRound(height() * 0.38), 12);
+    const qreal   arrowHeight = arrowWidth * 0.62;
+    const QPointF center      = arrowRect.center();
+    QPainterPath  caret;
+    caret.moveTo(center.x() - arrowWidth / 2.0, center.y() - arrowHeight / 2.0);
+    caret.lineTo(center.x() + arrowWidth / 2.0, center.y() - arrowHeight / 2.0);
+    caret.lineTo(center.x(), center.y() + arrowHeight / 2.0);
+    caret.closeSubpath();
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(!isEnabled()   ? WidgetColors::color(WidgetColors::Role::TextDisabled)
+                     : underMouse() ? WidgetColors::color(WidgetColors::Role::Text)
+                                    : WidgetColors::color(WidgetColors::Role::TextMuted));
+    painter.drawPath(caret);
+}
+
+void UniformComboBox::showPopup()
+{
+    Q_D(UniformComboBox);
+    if (d->m_overlayPopupEnabled)
+    {
+        if (isOverlayPopupVisible())
+            d->hideOverlayPopup();
+        else
+            d->showOverlayPopup();
+        return;
+    }
+
+    if (view())
+    {
+        const int visibleRows = qMin(count(), maxVisibleItems());
+        view()->setMinimumHeight(visibleRows * 32 + 2 * view()->frameWidth());
+    }
+    QComboBox::showPopup();
+    emit popupVisibilityChanged(true);
+}
+
+void UniformComboBox::hidePopup()
+{
+    Q_D(UniformComboBox);
+    if (d->m_overlayPopupEnabled)
+    {
+        d->hideOverlayPopup();
+        return;
+    }
+    QComboBox::hidePopup();
+    emit popupVisibilityChanged(false);
+}
+
+void UniformComboBox::keyPressEvent(QKeyEvent *event)
+{
+    Q_D(UniformComboBox);
+    if (d->m_overlayPopupEnabled)
+    {
+        if (isOverlayPopupVisible() && d->handleOverlayPopupKey(event))
+            return;
+        if (!isOverlayPopupVisible() && event
+            && (event->key() == Qt::Key_Down || event->key() == Qt::Key_Up || event->key() == Qt::Key_Space
+                || event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_F4))
+        {
+            d->showOverlayPopup();
+            return;
+        }
+    }
+    QComboBox::keyPressEvent(event);
+}
+
+bool UniformComboBox::eventFilter(QObject *watched, QEvent *event)
+{
+    Q_D(UniformComboBox);
+    if (!event)
+        return QComboBox::eventFilter(watched, event);
+
+    // Tool popup does not auto-dismiss like Qt::Popup. Title-bar clicks are
+    // non-client events, so they never arrive as MouseButtonPress.
+    const bool outsidePress = event->type() == QEvent::MouseButtonPress
+                           || event->type() == QEvent::NonClientAreaMouseButtonPress
+                           || event->type() == QEvent::NonClientAreaMouseButtonDblClick;
+    if (d->m_overlayPopupEnabled && isOverlayPopupVisible() && outsidePress)
+    {
+        const auto *mouse = static_cast<QMouseEvent *>(event);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        const QPoint globalPos = mouse->globalPosition().toPoint();
+#else
+        const QPoint globalPos = mouse->globalPos();
+#endif
+        const QRect comboGlobal(mapToGlobal(QPoint(0, 0)), size());
+        if (!containsOverlayPopup(globalPos) && !comboGlobal.contains(globalPos))
+            d->hideOverlayPopup();
+    }
+
+    if (watched == d->m_overlayPopup || watched == d->m_overlayList)
+    {
+        if (event->type() == QEvent::KeyPress && d->handleOverlayPopupKey(static_cast<QKeyEvent *>(event)))
+            return true;
+        if (watched == d->m_overlayPopup && event->type() == QEvent::Paint)
+        {
+            // WA_TranslucentBackground ignores stylesheet fills on macOS; paint manually.
+            QPainter painter(d->m_overlayPopup);
+            painter.setRenderHint(QPainter::Antialiasing, true);
+            const QRectF bounds = QRectF(d->m_overlayPopup->rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+            QPainterPath path;
+            path.addRoundedRect(bounds, d->m_overlayRadius, d->m_overlayRadius);
+            painter.fillPath(path, WidgetColors::color(WidgetColors::Role::Surface));
+            painter.setPen(QPen(WidgetColors::color(WidgetColors::Role::Border), 1.0));
+            painter.drawPath(path);
+            return false;
+        }
+        if (watched == d->m_overlayPopup && (event->type() == QEvent::Hide || event->type() == QEvent::Close))
+            d->notifyOverlayPopupHidden();
+    }
+    return QComboBox::eventFilter(watched, event);
+}
+
 void UniformComboBox::wheelEvent(QWheelEvent *event)
 {
     // 忽略滚轮事件，阻止滚轮切换选项
     event->ignore();
-}
-
-void UniformComboBox::bindModel(QAbstractItemModel *model)
-{
-    QObject::disconnect(m_rowsInsertedConnection);
-    QObject::disconnect(m_rowsRemovedConnection);
-    QObject::disconnect(m_modelResetConnection);
-    QObject::disconnect(m_dataChangedConnection);
-
-    if (!model)
-    {
-        return;
-    }
-
-    m_rowsInsertedConnection =
-        QObject::connect(model, &QAbstractItemModel::rowsInserted, this, [this]() { updateComboGeometry(); });
-    m_rowsRemovedConnection =
-        QObject::connect(model, &QAbstractItemModel::rowsRemoved, this, [this]() { updateComboGeometry(); });
-    m_modelResetConnection =
-        QObject::connect(model, &QAbstractItemModel::modelReset, this, [this]() { updateComboGeometry(); });
-    m_dataChangedConnection =
-        QObject::connect(model, &QAbstractItemModel::dataChanged, this, [this]() { updateComboGeometry(); });
-}
-
-void UniformComboBox::updateComboGeometry()
-{
-    adjustSize();
-    updateGeometry();
-    update();
 }

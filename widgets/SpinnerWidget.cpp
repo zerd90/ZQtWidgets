@@ -1,11 +1,21 @@
-
 #include "WidgetStyle.h"
 #include "WidgetColors.h"
 
 #include "SpinnerWidget.h"
 
-SpinnerWidget::SpinnerWidget(QWidget *parent) : QWidget(parent)
+#include <QPainter>
+#include <QTimer>
+
+class SpinnerWidgetPrivate
 {
+public:
+    QTimer timer;
+    int    angle = 0;
+};
+
+SpinnerWidget::SpinnerWidget(QWidget *parent) : QWidget(parent), d_ptr(std::make_unique<SpinnerWidgetPrivate>())
+{
+    Q_D(SpinnerWidget);
     ensureQtCustomWidgetsStyle();
     setFixedSize(QSize(16, 16));
     setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -13,29 +23,36 @@ SpinnerWidget::SpinnerWidget(QWidget *parent) : QWidget(parent)
     setAttribute(Qt::WA_TranslucentBackground);
     hide();
 
-    m_timer.setInterval(80);
-    connect(&m_timer, &QTimer::timeout, this,
+    d->timer.setInterval(80);
+    connect(&d->timer, &QTimer::timeout, this,
             [this]()
             {
-                m_angle = (m_angle + 30) % 360;
+                Q_D(SpinnerWidget);
+                d->angle = (d->angle + 30) % 360;
                 update();
             });
 }
+
+SpinnerWidget::~SpinnerWidget() = default;
+
 void SpinnerWidget::start()
 {
-    if (!m_timer.isActive())
-    {
-        m_timer.start();
-    }
+    Q_D(SpinnerWidget);
+    if (!d->timer.isActive())
+        d->timer.start();
     show();
 }
+
 void SpinnerWidget::stop()
 {
-    m_timer.stop();
+    Q_D(SpinnerWidget);
+    d->timer.stop();
     hide();
 }
+
 void SpinnerWidget::paintEvent(QPaintEvent *)
 {
+    Q_D(SpinnerWidget);
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
@@ -44,7 +61,7 @@ void SpinnerWidget::paintEvent(QPaintEvent *)
     const QPointF center(w / 2.0, h / 2.0);
 
     painter.translate(center);
-    painter.rotate(m_angle);
+    painter.rotate(d->angle);
 
     const int   spokes = 12;
     const qreal inner  = 4.5;

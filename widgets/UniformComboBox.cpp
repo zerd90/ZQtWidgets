@@ -253,8 +253,12 @@ bool UniformComboBox::eventFilter(QObject *watched, QEvent *event)
     if (!event)
         return QComboBox::eventFilter(watched, event);
 
-    // Tool popup does not auto-dismiss like Qt::Popup; close on outside press.
-    if (m_overlayPopupEnabled && isOverlayPopupVisible() && event->type() == QEvent::MouseButtonPress)
+    // Tool popup does not auto-dismiss like Qt::Popup. Title-bar clicks are
+    // non-client events, so they never arrive as MouseButtonPress.
+    const bool outsidePress = event->type() == QEvent::MouseButtonPress
+                           || event->type() == QEvent::NonClientAreaMouseButtonPress
+                           || event->type() == QEvent::NonClientAreaMouseButtonDblClick;
+    if (m_overlayPopupEnabled && isOverlayPopupVisible() && outsidePress)
     {
         const auto *mouse = static_cast<QMouseEvent *>(event);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)

@@ -288,13 +288,21 @@ void UniformComboBoxPrivate::refreshPaletteDependentStyle()
 
 void UniformComboBoxPrivate::ensureOverlayPopup()
 {
-    if (m_overlayPopup)
-        return;
-
     // Prefer Tool+StaysOnTop over Qt::Popup: native Metal/OpenGL player surfaces
     // sit above normal popups and steal hover, which instantly dismisses Qt::Popup.
-    m_overlayPopup =
-        new QFrame(nullptr, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::NoDropShadowWindowHint);
+    // Parent to the combo's window so modal QDialog::exec() still delivers clicks
+    // (an unparented Tool window is blocked by the modal session).
+    const Qt::WindowFlags popupFlags =
+        Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::NoDropShadowWindowHint;
+    QWidget *popupParent = q->window() ? q->window() : static_cast<QWidget *>(q);
+    if (m_overlayPopup)
+    {
+        if (m_overlayPopup->parentWidget() != popupParent)
+            m_overlayPopup->setParent(popupParent, popupFlags);
+        return;
+    }
+
+    m_overlayPopup = new QFrame(popupParent, popupFlags);
     m_overlayPopup->setObjectName(QStringLiteral("uniformComboPopup"));
     m_overlayPopup->setAttribute(Qt::WA_TranslucentBackground, true);
     m_overlayPopup->setAttribute(Qt::WA_NoSystemBackground, true);

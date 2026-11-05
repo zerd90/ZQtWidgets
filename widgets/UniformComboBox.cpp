@@ -88,13 +88,14 @@ public:
     UniformComboBox *q = nullptr;
 
     // Always use Tool overlay popup (avoids native player surface dismissing Qt::Popup).
-    bool                    m_overlayPopupEnabled = true;
-    bool                    m_appFilterInstalled  = false;
-    int                     m_overlayFontPx       = 14;
-    int                     m_overlayRowHeight    = 32;
-    int                     m_overlayRadius       = 8;
-    int                     m_overlayGap          = 6;
-    int                     m_overlayFramePad     = 4;
+    bool                    m_overlayPopupEnabled     = true;
+    bool                    m_overlayPopupPreferBelow = false;
+    bool                    m_appFilterInstalled      = false;
+    int                     m_overlayFontPx           = 14;
+    int                     m_overlayRowHeight        = 32;
+    int                     m_overlayRadius           = 8;
+    int                     m_overlayGap              = 6;
+    int                     m_overlayFramePad         = 4;
     QPointer<QFrame>        m_overlayPopup;
     QPointer<QListWidget>   m_overlayList;
     QVariantAnimation      *m_overlayAnimation = nullptr;
@@ -183,11 +184,13 @@ void UniformComboBoxPrivate::placeOverlayPopup(int popupWidth, int popupHeight)
         return;
 
     // Anchor to the combo itself (works for toolbar overlay fish combos and
-    // normal window combos like stream/speed). Prefer above; fall back below.
+    // normal window combos like stream/speed). Default prefers above; callers can
+    // request below-first (e.g. top-of-dialog stream pickers).
     const QPoint comboTopLeft = overlayComboGlobalPos();
     const int    comboBottom  = comboTopLeft.y() + q->height();
     int          popupX       = comboTopLeft.x();
-    int          popupY       = comboTopLeft.y() - popupHeight - m_overlayGap;
+    int          popupY =
+        m_overlayPopupPreferBelow ? (comboBottom + m_overlayGap) : (comboTopLeft.y() - popupHeight - m_overlayGap);
 
     if (QScreen *screen = q->screen())
     {
@@ -197,7 +200,16 @@ void UniformComboBoxPrivate::placeOverlayPopup(int popupWidth, int popupHeight)
         const int  belowY    = comboBottom + m_overlayGap;
         const bool fitsAbove = aboveY >= avail.top();
         const bool fitsBelow = belowY + popupHeight - 1 <= avail.bottom();
-        if (fitsAbove)
+        if (m_overlayPopupPreferBelow)
+        {
+            if (fitsBelow)
+                popupY = belowY;
+            else if (fitsAbove)
+                popupY = aboveY;
+            else
+                popupY = avail.top();
+        }
+        else if (fitsAbove)
             popupY = aboveY;
         else if (fitsBelow)
             popupY = belowY;
@@ -584,6 +596,12 @@ void UniformComboBox::setOverlayPopupEnabled(bool enabled)
     d->m_overlayPopupEnabled = enabled;
     if (!enabled)
         d->hideOverlayPopup();
+}
+
+void UniformComboBox::setOverlayPopupPreferBelow(bool preferBelow)
+{
+    Q_D(UniformComboBox);
+    d->m_overlayPopupPreferBelow = preferBelow;
 }
 
 void UniformComboBox::setOverlayPopupMetrics(int fontPx, int rowHeight, int radius, int gapAboveBar, int framePadding)

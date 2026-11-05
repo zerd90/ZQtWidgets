@@ -20,6 +20,7 @@ public:
     void setModel(QAbstractItemModel *model) override;
     void setItemEnabled(int index, bool enabled);
     void setOverlayPopupEnabled(bool enabled);
+    void setOverlayPopupPreferBelow(bool preferBelow);
     void setOverlayPopupMetrics(int fontPx, int rowHeight, int radius, int gapAboveBar, int framePadding);
     bool isOverlayPopupVisible() const;
     bool containsOverlayPopup(const QPoint &globalPos) const;
